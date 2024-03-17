@@ -1,0 +1,131 @@
+---
+- name: 'Установка и настройка сервера backup'
+  hosts: all
+  become: yes
+  tasks:
+    - name: 'Установка epel'
+      yum: 
+        name: epel-release
+        state: latest
+
+    - name: 'Установка borgbackup'
+      yum:
+        name: borgbackup
+        state: latest
+
+    - name: 'Создание пользователя'
+      user: 
+        name: borg
+#        password: 123456
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание каталога ssh'
+      file: 
+        path: /home/borg/.ssh
+        state: directory
+        owner: borg
+        group: borg
+        mode: 0700
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание файла autorized'
+      file: 
+        path: /home/borg/.ssh/authorized_keys
+        state: touch
+        owner: borg 
+        group: borg
+        mode: 0600
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание директории backup'
+      file:
+        path: /var/backup
+        state: directory
+        owner: borg
+        group: borg
+        mode: '0755'
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание раздела'
+      parted:
+        device: /dev/sdb
+        number: 1
+        flags: [lvm]
+        part_end: "100%"
+        state: present
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание vgs'
+      lvg: 
+        vg: vg_backup
+        pvs: /dev/sdb1
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание lvs'
+      lvol:
+        vg: vg_backup
+        lv: lv_backup
+        size: 100%FREE
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Создание файловой системы'
+      filesystem: 
+        fstype: ext4
+        dev: /dev/vg_backup/lv_backup
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Монтирование'
+      mount: 
+        path: /var/backup
+        src: /dev/vg_backup/lv_backup
+        fstype: ext4
+        state: mounted
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Очистка директории backup'
+      shell: rm -rf /var/backup/lost_found
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Переназначааем права на директорию'
+      shell: chown borg:borg /var/backup
+      when: "'backup' in inventory_hostname"
+
+    - name: Создать SSH ключ для anscfg в ~anscfg/.ssh/id_rsa
+      user:
+        name: root
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: .ssh/id_rsa
+     
+      when: "'client' in inventory_hostname"
+
+#    - name: Retrieve public key
+#      shell: cat /root/.ssh/id_rsa.pub
+#      register: master_public_key
+#      changed_when: false
+#      when: "'client' in inventory_hostname"
+#      tags: test
+
+    - name: 'Добавляем known hosts'
+      shell: ssh-keyscan 192.168.56.10 >> ~/.ssh/known_hosts
+      when: "'client' in inventory_hostname"
+
+
+    - name: 'Открываем подключение по ssh'
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "PasswordAuthentication no"
+        replace: "PasswordAuthentication yes"
+      when: "'backup' in inventory_hostname"
+    
+    - name: 'Перезагружаем sshd'
+      systemd:
+        name: sshd
+        state: restarted
+        enabled: yes
+      when: "'backup' in inventory_hostname"
+
+    - name: 'Заполняем autorized'
+      shell: cat /tmp/client_id_rsa.pub >> /home/borg/.ssh/authorized_keys
+      register: addtoauth
+      ignore_errors: yes

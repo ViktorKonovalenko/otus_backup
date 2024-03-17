@@ -1,0 +1,41 @@
+---
+- name: 'Установка и настройка сервера backup'
+  hosts: all
+  become: yes
+  tasks:
+    - name: 'Установка epel'
+      yum: 
+        name: epel-release
+        state: latest
+
+    - name: 'Установка borgbackup'
+      yum:
+        name: borgbackup
+        state: latest
+
+    - name: Создать SSH ключ для anscfg в ~anscfg/.ssh/id_rsa
+      user:
+        name: root
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: .ssh/id_rsa
+
+      when: "'client' in inventory_hostname"
+ 
+    - name: 'Добавляем known hosts'
+      shell: ssh-keyscan 192.168.56.10 >> ~/.ssh/known_hosts
+      when: "'client' in inventory_hostname"
+      ignore_errors: yes
+ 
+    - name: 'Копирование ключа'
+      fetch:
+        src: "/root/.ssh/id_rsa.pub"
+        dest: "/home/viktor/otus_backup/client_id_rsa.pub"
+        flat: yes
+      ignore_errors: yes
+    
+    - name: 'Копирование ключа на backup'
+      copy:
+        src: "/home/viktor/otus_backup/client_id_rsa.pub"
+        dest: "/tmp/client_id_rsa.pub"
+      ignore_errors: yes
